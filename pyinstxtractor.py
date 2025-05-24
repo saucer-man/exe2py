@@ -1,5 +1,5 @@
 """
-PyInstaller Extractor v2.0 (Supports pyinstaller 4.5.1, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0, 3.6, 3.5, 3.4, 3.3, 3.2, 3.1, 3.0, 2.1, 2.0)
+PyInstaller Extractor v2.0 (Supports pyinstaller 6.12.0, 6.11.1, 6.11.0, 6.10.0, 6.9.0, 6.8.0, 6.7.0, 6.6.0, 6.5.0, 6.4.0, 6.3.0, 6.2.0, 6.1.0, 6.0.0, 5.13.2, 5.13.1, 5.13.0, 5.12.0, 5.11.0, 5.10.1, 5.10.0, 5.9.0, 5.8.0, 5.7.0, 5.6.2, 5.6.1, 5.6, 5.5, 5.4.1, 5.4, 5.3, 5.2, 5.1, 5.0.1, 5.0, 4.10, 4.9, 4.8, 4.7, 4.6, 4.5.1, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0, 3.6, 3.5, 3.4, 3.3, 3.2, 3.1, 3.0, 2.1, 2.0)
 Author : Extreme Coders
 E-mail : extremecoders(at)hotmail(dot)com
 Web    : https://0xec.blogspot.com
@@ -20,7 +20,7 @@ extracting the PYZ archive.
 Usage : Just copy this script to the directory where your exe resides
         and run the script with the exe file name as a parameter
 
-C:\path\to\exe\>python pyinstxtractor.py <filename>
+C:\\path\\to\\exe\\>python pyinstxtractor.py <filename>
 $ /path/to/exe/python pyinstxtractor.py <filename>
 
 Licensed under GNU General Public License (GPL) v3.
@@ -91,14 +91,6 @@ import zlib
 import sys
 from uuid import uuid4 as uniquename
 
-# imp is deprecated in Python3 in favour of importlib
-if sys.version_info.major == 3:
-    from importlib.util import MAGIC_NUMBER
-    pyc_magic = MAGIC_NUMBER
-else:
-    import imp
-    pyc_magic = imp.get_magic()
-
 
 class CTOCEntry:
     def __init__(self, position, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name):
@@ -111,13 +103,14 @@ class CTOCEntry:
 
 
 class PyInstArchive:
-    PYINST20_COOKIE_SIZE = 24           # For pyinstaller 2.0
-    PYINST21_COOKIE_SIZE = 24 + 64      # For pyinstaller 2.1+
+    PYINST20_COOKIE_SIZE = 24  # For pyinstaller 2.0
+    PYINST21_COOKIE_SIZE = 24 + 64  # For pyinstaller 2.1+
     MAGIC = b'MEI\014\013\012\013\016'  # Magic number which identifies pyinstaller
 
     def __init__(self, path):
         self.filePath = path
-
+        self.pycMagic = b'\0' * 4
+        self.barePycList = []  # List of pyc's whose headers have to be fixed
 
     def open(self):
         try:
@@ -128,13 +121,11 @@ class PyInstArchive:
             return False
         return True
 
-
     def close(self):
         try:
             self.fPtr.close()
         except:
             pass
-
 
     def checkFile(self):
         print('[+] Processing {0}'.format(self.filePath))
@@ -174,15 +165,14 @@ class PyInstArchive:
 
         self.fPtr.seek(self.cookiePos + self.PYINST20_COOKIE_SIZE, os.SEEK_SET)
 
-        if b'python' in self.fPtr.read(64):
+        if b'python' in self.fPtr.read(64).lower():
             print('[+] Pyinstaller version: 2.1+')
-            self.pyinstVer = 21     # pyinstaller 2.1+
+            self.pyinstVer = 21  # pyinstaller 2.1+
         else:
-            self.pyinstVer = 20     # pyinstaller 2.0
+            self.pyinstVer = 20  # pyinstaller 2.0
             print('[+] Pyinstaller version: 2.0')
 
         return True
-
 
     def getCArchiveInfo(self):
         try:
@@ -190,25 +180,27 @@ class PyInstArchive:
                 self.fPtr.seek(self.cookiePos, os.SEEK_SET)
 
                 # Read CArchive cookie
-                (magic, lengthofPackage, toc, tocLen, self.pyver) = \
-                struct.unpack('!8siiii', self.fPtr.read(self.PYINST20_COOKIE_SIZE))
+                (magic, lengthofPackage, toc, tocLen, pyver) = \
+                    struct.unpack('!8siiii', self.fPtr.read(self.PYINST20_COOKIE_SIZE))
 
             elif self.pyinstVer == 21:
                 self.fPtr.seek(self.cookiePos, os.SEEK_SET)
 
                 # Read CArchive cookie
-                (magic, lengthofPackage, toc, tocLen, self.pyver, pylibname) = \
-                struct.unpack('!8siiii64s', self.fPtr.read(self.PYINST21_COOKIE_SIZE))
+                (magic, lengthofPackage, toc, tocLen, pyver, pylibname) = \
+                    struct.unpack('!8sIIii64s', self.fPtr.read(self.PYINST21_COOKIE_SIZE))
 
         except:
             print('[!] Error : The file is not a pyinstaller archive')
             return False
 
-        print('[+] Python version: {0}'.format(self.pyver))
+        self.pymaj, self.pymin = (pyver // 100, pyver % 100) if pyver >= 100 else (pyver // 10, pyver % 10)
+        print('[+] Python version: {0}.{1}'.format(self.pymaj, self.pymin))
 
         # Additional data after the cookie
-        tailBytes = self.fileSize - self.cookiePos - (self.PYINST20_COOKIE_SIZE if self.pyinstVer == 20 else self.PYINST21_COOKIE_SIZE)
-        
+        tailBytes = self.fileSize - self.cookiePos - (
+            self.PYINST20_COOKIE_SIZE if self.pyinstVer == 20 else self.PYINST21_COOKIE_SIZE)
+
         # Overlay is the data appended at the end of the PE
         self.overlaySize = lengthofPackage + tailBytes
         self.overlayPos = self.fileSize - self.overlaySize
@@ -217,7 +209,6 @@ class PyInstArchive:
 
         print('[+] Length of package: {0} bytes'.format(lengthofPackage))
         return True
-
 
     def parseTOC(self):
         # Go to the table of contents
@@ -228,42 +219,50 @@ class PyInstArchive:
 
         # Parse table of contents
         while parsedLen < self.tableOfContentsSize:
-            (entrySize, ) = struct.unpack('!i', self.fPtr.read(4))
-            nameLen = struct.calcsize('!iiiiBc')
+            (entrySize,) = struct.unpack('!i', self.fPtr.read(4))
+            nameLen = struct.calcsize('!iIIIBc')
 
             (entryPos, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name) = \
-            struct.unpack( \
-                '!iiiBc{0}s'.format(entrySize - nameLen), \
-                self.fPtr.read(entrySize - 4))
+                struct.unpack( \
+                    '!IIIBc{0}s'.format(entrySize - nameLen), \
+                    self.fPtr.read(entrySize - 4))
 
-            name = name.decode('utf-8').rstrip('\0')
+            try:
+                name = name.decode("utf-8").rstrip("\0")
+            except UnicodeDecodeError:
+                newName = str(uniquename())
+                print('[!] Warning: File name {0} contains invalid bytes. Using random name {1}'.format(name, newName))
+                name = newName
+
+            # Prevent writing outside the extraction directory
+            if name.startswith("/"):
+                name = name.lstrip("/")
+
             if len(name) == 0:
                 name = str(uniquename())
                 print('[!] Warning: Found an unamed file in CArchive. Using random name {0}'.format(name))
 
             self.tocList.append( \
-                                CTOCEntry(                      \
-                                    self.overlayPos + entryPos, \
-                                    cmprsdDataSize,             \
-                                    uncmprsdDataSize,           \
-                                    cmprsFlag,                  \
-                                    typeCmprsData,              \
-                                    name                        \
-                                ))
+                CTOCEntry( \
+                    self.overlayPos + entryPos, \
+                    cmprsdDataSize, \
+                    uncmprsdDataSize, \
+                    cmprsFlag, \
+                    typeCmprsData, \
+                    name \
+                    ))
 
             parsedLen += entrySize
         print('[+] Found {0} files in CArchive'.format(len(self.tocList)))
 
-
     def _writeRawData(self, filepath, data):
         nm = filepath.replace('\\', os.path.sep).replace('/', os.path.sep).replace('..', '__')
         nmDir = os.path.dirname(nm)
-        if nmDir != '' and not os.path.exists(nmDir): # Check if path exists, create if not
+        if nmDir != '' and not os.path.exists(nmDir):  # Check if path exists, create if not
             os.makedirs(nmDir)
 
         with open(nm, 'wb') as f:
             f.write(data)
-
 
     def extractFiles(self):
         print('[+] Beginning extraction...please standby')
@@ -275,32 +274,61 @@ class PyInstArchive:
         os.chdir(extractionDir)
 
         for entry in self.tocList:
+            self.fPtr.seek(entry.position, os.SEEK_SET)
+            data = self.fPtr.read(entry.cmprsdDataSize)
+
+            if entry.cmprsFlag == 1:
+                try:
+                    data = zlib.decompress(data)
+                except zlib.error:
+                    print('[!] Error : Failed to decompress {0}'.format(entry.name))
+                    continue
+                # Malware may tamper with the uncompressed size
+                # Comment out the assertion in such a case
+                assert len(data) == entry.uncmprsdDataSize  # Sanity Check
+
+            if entry.typeCmprsData == b'd' or entry.typeCmprsData == b'o':
+                # d -> ARCHIVE_ITEM_DEPENDENCY
+                # o -> ARCHIVE_ITEM_RUNTIME_OPTION
+                # These are runtime options, not files
+                continue
+
             basePath = os.path.dirname(entry.name)
             if basePath != '':
                 # Check if path exists, create if not
                 if not os.path.exists(basePath):
                     os.makedirs(basePath)
 
-            self.fPtr.seek(entry.position, os.SEEK_SET)
-            data = self.fPtr.read(entry.cmprsdDataSize)
-
-            if entry.cmprsFlag == 1:
-                data = zlib.decompress(data)
-                # Malware may tamper with the uncompressed size
-                # Comment out the assertion in such a case
-                assert len(data) == entry.uncmprsdDataSize # Sanity Check
-
             if entry.typeCmprsData == b's':
                 # s -> ARCHIVE_ITEM_PYSOURCE
                 # Entry point are expected to be python scripts
                 print('[+] Possible entry point: {0}.pyc'.format(entry.name))
+
+                if self.pycMagic == b'\0' * 4:
+                    # if we don't have the pyc header yet, fix them in a later pass
+                    self.barePycList.append(entry.name + '.pyc')
                 self._writePyc(entry.name + '.pyc', data)
 
             elif entry.typeCmprsData == b'M' or entry.typeCmprsData == b'm':
                 # M -> ARCHIVE_ITEM_PYPACKAGE
                 # m -> ARCHIVE_ITEM_PYMODULE
-                # packages and modules are pyc files with their header's intact
-                self._writeRawData(entry.name + '.pyc', data)
+                # packages and modules are pyc files with their header intact
+
+                # From PyInstaller 5.3 and above pyc headers are no longer stored
+                # https://github.com/pyinstaller/pyinstaller/commit/a97fdf
+                if data[2:4] == b'\r\n':
+                    # < pyinstaller 5.3
+                    if self.pycMagic == b'\0' * 4:
+                        self.pycMagic = data[0:4]
+                    self._writeRawData(entry.name + '.pyc', data)
+
+                else:
+                    # >= pyinstaller 5.3
+                    if self.pycMagic == b'\0' * 4:
+                        # if we don't have the pyc header yet, fix them in a later pass
+                        self.barePycList.append(entry.name + '.pyc')
+
+                    self._writePyc(entry.name + '.pyc', data)
 
             else:
                 self._writeRawData(entry.name, data)
@@ -308,43 +336,60 @@ class PyInstArchive:
                 if entry.typeCmprsData == b'z' or entry.typeCmprsData == b'Z':
                     self._extractPyz(entry.name)
 
+        # Fix bare pyc's if any
+        self._fixBarePycs()
+
+    def _fixBarePycs(self):
+        for pycFile in self.barePycList:
+            with open(pycFile, 'r+b') as pycFile:
+                # Overwrite the first four bytes
+                pycFile.write(self.pycMagic)
 
     def _writePyc(self, filename, data):
         with open(filename, 'wb') as pycFile:
-            pycFile.write(pyc_magic)            # pyc magic
+            pycFile.write(self.pycMagic)  # pyc magic
 
-            if self.pyver >= 37:                # PEP 552 -- Deterministic pycs
-                pycFile.write(b'\0' * 4)        # Bitfield
-                pycFile.write(b'\0' * 8)        # (Timestamp + size) || hash 
+            if self.pymaj >= 3 and self.pymin >= 7:  # PEP 552 -- Deterministic pycs
+                pycFile.write(b'\0' * 4)  # Bitfield
+                pycFile.write(b'\0' * 8)  # (Timestamp + size) || hash
 
             else:
-                pycFile.write(b'\0' * 4)      # Timestamp
-                if self.pyver >= 33:
+                pycFile.write(b'\0' * 4)  # Timestamp
+                if self.pymaj >= 3 and self.pymin >= 3:
                     pycFile.write(b'\0' * 4)  # Size parameter added in Python 3.3
 
             pycFile.write(data)
 
-
     def _extractPyz(self, name):
-        dirName =  name + '_extracted'
+        dirName = name + '_extracted'
         # Create a directory for the contents of the pyz
         if not os.path.exists(dirName):
             os.mkdir(dirName)
 
         with open(name, 'rb') as f:
             pyzMagic = f.read(4)
-            assert pyzMagic == b'PYZ\0' # Sanity Check
+            assert pyzMagic == b'PYZ\0'  # Sanity Check
 
-            pycHeader = f.read(4) # Python magic value
+            pyzPycMagic = f.read(4)  # Python magic value
+
+            if self.pycMagic == b'\0' * 4:
+                self.pycMagic = pyzPycMagic
+
+            elif self.pycMagic != pyzPycMagic:
+                self.pycMagic = pyzPycMagic
+                print('[!] Warning: pyc magic of files inside PYZ archive are different from those in CArchive')
 
             # Skip PYZ extraction if not running under the same python version
-            if pyc_magic != pycHeader:
-                print('[!] Warning: This script is running in a different Python version than the one used to build the executable.')
-                print('[!] Please run this script in Python{0} to prevent extraction errors during unmarshalling'.format(self.pyver))
+            if self.pymaj != sys.version_info.major or self.pymin != sys.version_info.minor:
+                print(
+                    '[!] Warning: This script is running in a different Python version than the one used to build the executable.')
+                print(
+                    '[!] Please run this script in Python {0}.{1} to prevent extraction errors during unmarshalling'.format(
+                        self.pymaj, self.pymin))
                 print('[!] Skipping pyz extraction')
                 return
 
-            (tocPosition, ) = struct.unpack('!i', f.read(4))
+            (tocPosition,) = struct.unpack('!i', f.read(4))
             f.seek(tocPosition, os.SEEK_SET)
 
             try:
@@ -394,9 +439,6 @@ class PyInstArchive:
 
 
 def main():
-    print("-------------")
-    print(sys.argv)
-    print("-------------")
     if len(sys.argv) < 2:
         print('[+] Usage: pyinstxtractor.py <filename>')
 
