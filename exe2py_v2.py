@@ -2,6 +2,7 @@ import os
 import dis
 import marshal
 import types
+import time
 from pathlib import Path
 from deepseek_ai import query_ai
 from pyinstxtractor import PyInstArchive
@@ -25,7 +26,11 @@ def extract_pyc(exe_path):
 
 
 def find_pyc_files(extract_dir):
-    return list(Path(extract_dir).rglob("*.pyc"))
+    res = []
+    for file in os.listdir(extract_dir):
+        if file.endswith(".pyc"):
+            res.append(os.path.join(extract_dir,file))
+    return res
 
 def parse_pyc(pyc_file):
     with open(pyc_file, "rb") as f:
@@ -70,6 +75,7 @@ def rebuild_source(pyc_file):
 
 def main(exe_path):
     extract_dir = extract_pyc(exe_path)
+    time.sleep(2)
     pyc_files = find_pyc_files(extract_dir)
     print(f"pyc_files:{pyc_files}")
     for pyc_file in pyc_files:
