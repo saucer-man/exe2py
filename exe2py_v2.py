@@ -18,7 +18,7 @@ def extract_pyc(exe_path):
                 arch.extractFiles()
                 arch.close()
                 print(f'[+] Successfully extracted pyinstaller archive: {exe_path} to {dest_dir}')
-                return os.path.join(os.getcwd(), os.path.basename(exe_path) + '_extracted')
+                return dest_dir
 
 
         arch.close()
